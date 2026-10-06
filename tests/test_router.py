@@ -233,6 +233,61 @@ def test_each_successful_route_appends_one_line(tmp_path):
     assert "hello" not in raw
 
 
+ORDINARY_CLAUDE_TEXTS = (
+    "hard reasoning about caching",
+    "reason step by step about the outage",
+    "design comparison",
+    "compare designs for the cache layer",
+    "summarize this 80-page report",
+    "this document is very long, please summarize it",
+    "review the attached whitepaper",
+    "a python def block",
+    "a fenced python block",
+    "write a python script that parses csv",
+    "debug the stack trace in the parser module",
+    "def add(a, b):\n    return a - b",
+    "```python\nprint('ok')\n```",
+)
+
+STAY_COPILOT_TEXTS = (
+    "draft an email to the team",
+    "refactor this confidential customer data function",
+)
+
+
+@pytest.mark.parametrize("text", ORDINARY_CLAUDE_TEXTS)
+def test_ordinary_claude_family_wording_exits_when_policy_allows(text):
+    decision = classify(text)
+    assert decision.backend == "claude", text
+    assert decision.boundary_exit is True
+    assert decision.reason.startswith("task:")
+    scored = score_task(text)
+    assert scored.family == "claude"
+
+
+@pytest.mark.parametrize("text", STAY_COPILOT_TEXTS)
+def test_email_and_sensitive_code_stay_on_copilot(text):
+    decision = classify(text)
+    assert decision.backend == "copilot", text
+    assert decision.boundary_exit is False
+
+
+@pytest.mark.parametrize("text", ORDINARY_CLAUDE_TEXTS)
+@pytest.mark.parametrize("label", ("confidential", "customer data", "PHI", "HIPAA", "restricted", "ssn", "mrn"))
+def test_sensitive_label_blocks_ordinary_claude_wording(text, label):
+    decision = classify(f"{text}\nLabel: {label}")
+    assert decision.backend == "copilot"
+    assert decision.boundary_exit is False
+    assert decision.reason.startswith("sensitive:")
+
+
+def test_short_office_writing_stays_unknown_copilot():
+    decision = classify("short Office writing for the all-hands")
+    assert decision.backend == "copilot"
+    assert decision.boundary_exit is False
+    assert decision.reason == "unknown"
+
+
 def test_append_decision_rejects_non_integer_length(tmp_path):
     path = tmp_path / "audit.jsonl"
     with pytest.raises(TypeError):
